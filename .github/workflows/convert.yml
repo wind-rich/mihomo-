@@ -1,25 +1,22 @@
-name: 自动转换MRS (v1.18稳定版)
+name: 转纯域名MRS (防崩溃版)
 on: [push]
 
 jobs:
   convert:
     runs-on: ubuntu-latest
+    timeout-minutes: 5 # 设置超时，防止卡死一小时
     steps:
       - name: 1. 检出代码
         uses: actions/checkout@v3
 
-      - name: 2. 下载 Mihomo v1.18.1 (稳定版)
+      - name: 2. 下载 Mihomo v1.19.1 (换回新版，用Domain模式避开Bug)
         run: |
-          # 降级到 v1.18.1，避开 v1.19 的崩溃 Bug
-          wget https://github.com/MetaCubeX/mihomo/releases/download/v1.18.1/mihomo-linux-amd64-v1.18.1.gz
-          gunzip mihomo-linux-amd64-v1.18.1.gz
-          mv mihomo-linux-amd64-v1.18.1 mihomo
+          wget https://github.com/MetaCubeX/mihomo/releases/download/v1.19.1/mihomo-linux-amd64-v1.19.1.gz
+          gunzip mihomo-linux-amd64-v1.19.1.gz
+          mv mihomo-linux-amd64-v1.19.1 mihomo
           chmod +x mihomo
-          
-          # 打印版本号确认
-          ./mihomo -v
 
-      - name: 3. 开始转换
+      - name: 3. 执行清洗与转换
         run: |
           mkdir output
           
@@ -28,38 +25,29 @@ jobs:
             echo "正在处理: $file"
             
             # =======================================================
-            # 🧹 清洗文件 (保留最原始的 text 模式，因为 v1.18 很稳)
+            # 🧹 手术步骤：转为纯域名列表
+            # 1. 删掉 Windows 回车
+            # 2. 删掉 DOMAIN-SUFFIX, 前缀
+            # 3. 删掉 DOMAIN, 前缀
+            # 4. 只保留看起来像域名的行 (包含点的行)
             # =======================================================
-            # 1. 删除 Windows 回车符
-            # 2. 删除注释和空行
-            # 3. 确保每一行都有逗号
-            cat "$file" | tr -d '\r' | grep -vE "^#|^$" | grep "," > clean.list
+            cat "$file" | tr -d '\r' | sed 's/DOMAIN-SUFFIX,//g' | sed 's/DOMAIN,//g' | grep "\." > clean_domain.list
+            
+            echo "--- 预览清洗后的纯域名 (前5行) ---"
+            head -n 5 clean_domain.list
+            echo "----------------------------------"
             
             filename=$(basename "$file" .list)
             
-            # =======================================================
-            # ⚙️ 执行转换 (尝试两种命令格式，确保兼容 v1.18)
-            # =======================================================
+            # ⚙️ 转换命令：使用 'domain' 行为
+            # 这种模式下内核极少崩溃
+            ./mihomo convert-ruleset domain text clean_domain.list "output/$filename.mrs"
             
-            echo "尝试命令格式 A (4参数)..."
-            if ./mihomo convert-ruleset classical text clean.list "output/$filename.mrs"; then
-                echo "✅ 转换成功 (格式 A)"
-            else
-                echo "⚠️ 格式 A 失败，尝试命令格式 B (3参数，旧版写法)..."
-                # 旧版可能不需要 'text' 参数
-                if ./mihomo convert-ruleset classical clean.list "output/$filename.mrs"; then
-                    echo "✅ 转换成功 (格式 B)"
-                else
-                    echo "❌ 全部失败！请检查日志。"
-                    exit 1
-                fi
-            fi
-            
-            rm clean.list
+            rm clean_domain.list
           done
 
       - name: 4. 上传结果
         uses: actions/upload-artifact@v4
         with:
-          name: mrs-rules-pack
+          name: mrs-domain-files
           path: output/*.mrs
