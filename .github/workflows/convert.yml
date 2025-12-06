@@ -1,5 +1,5 @@
-name: 自动转换MRS
-on: [push]  # 只要你上传文件，机器就启动
+name: 自动转换MRS (强力修复版)
+on: [push]
 
 jobs:
   convert:
@@ -8,38 +8,47 @@ jobs:
       - name: 1. 检出代码
         uses: actions/checkout@v3
 
-      - name: 2. 下载 Mihomo 内核 (Linux电脑版)
+      - name: 2. 下载 Mihomo 内核
         run: |
-          # 下载最新的官方内核 (AMD64架构，因为GitHub服务器是电脑)
           wget https://github.com/MetaCubeX/mihomo/releases/download/v1.19.1/mihomo-linux-amd64-v1.19.1.gz
           gunzip mihomo-linux-amd64-v1.19.1.gz
           mv mihomo-linux-amd64-v1.19.1 mihomo
           chmod +x mihomo
 
-      - name: 3. 开始转换 (自动清洗格式)
+      - name: 3. 开始转换
         run: |
-          # 创建存放结果的文件夹
           mkdir output
           
-          # 循环处理所有 .list 文件
           for file in *.list; do
-            # 如果没有文件则跳过
             [ -e "$file" ] || continue
-            
             echo "正在处理: $file"
             
-            # 自动清洗：去掉Windows回车符，防止报错
-            sed -i 's/\r//g' "$file"
+            # =======================================================
+            # 🧹【核心修复】强力清洗步骤
+            # 1. tr -d '\r': 删除 Windows 回车符
+            # 2. grep -vE: 删除以 # 开头的注释行，和空行
+            # 3. awk ...: 只保留包含逗号(,)且逗号前后都有内容的行
+            # =======================================================
+            cat "$file" | tr -d '\r' | grep -vE "^#|^$" | awk -F, 'NF>=2 && $1!="" && $2!=""' > clean_temp.list
             
-            # 获取文件名（不带后缀）
+            # 打印前几行看看清洗结果 (调试用)
+            echo "--- 清洗后文件预览 (前5行) ---"
+            head -n 5 clean_temp.list
+            echo "------------------------------"
+            
+            # 获取文件名
             filename=$(basename "$file" .list)
             
-            # 执行转换命令 (关键：使用 text 参数)
-            ./mihomo convert-ruleset classical text "$file" "output/$filename.mrs"
+            # 使用清洗后的文件进行转换
+            # 注意：这里继续使用 text 格式
+            ./mihomo convert-ruleset classical text clean_temp.list "output/$filename.mrs"
+            
+            # 删除临时文件
+            rm clean_temp.list
           done
 
-      - name: 4. 上传结果供下载
+      - name: 4. 上传结果
         uses: actions/upload-artifact@v4
         with:
-          name: mrs-rules-pack  # 下载时的压缩包名字
+          name: mrs-rules-pack
           path: output/*.mrs
